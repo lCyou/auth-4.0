@@ -2,52 +2,65 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"openid-aas/backend/config"
+	"openid-aas/backend/database"
+	"openid-aas/backend/routes"
+	"openid-aas/backend/utils"
 
 	"github.com/gin-gonic/gin"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func main() {
-	// ユーザーから提供されたデータベース接続情報
-	connString := "postgres://user:password@localhost:5432/minus_four"
-
-	// データベース接続プールを作成
-	dbpool, err := pgxpool.New(context.Background(), connString)
+	// Load configuration
+	cfg, err := config.LoadConfig()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Unable to create connection pool: %v\n", err)
-		os.Exit(1)
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	// Initialize JWT keys
+	if err := utils.InitializeKeys(); err != nil {
+		log.Fatalf("Failed to initialize JWT keys: %v", err)
+	}
+
+	// Connect to database
+	dbpool, err := database.Connect(cfg.DatabaseURL)
+	if err != nil {
+		log.Fatalf("Failed to connect to database: %v", err)
 	}
 	defer dbpool.Close()
 
-	// Ginルーターを作成
+	log.Println("Successfully connected to database")
+
+	// Set Gin mode
+	if cfg.Environment == "production" {
+		gin.SetMode(gin.ReleaseMode)
+	}
+
+	// Create Gin router
 	r := gin.Default()
 
-	// 既存の/pingエンドポイント
-	r.GET("/ping", func(c *gin.Context) {
-		c.JSON(200, gin.H{
-			"message": "pong-v2",
-		})
-	})
+	// Setup routes
+	routes.Setup(r, dbpool, cfg)
 
-	// データベース接続を確認する新しい/db-pingエンドポイント
-	r.GET("/db-ping", func(c *gin.Context) {
-		err := dbpool.Ping(context.Background())
-		if err != nil {
-			c.JSON(500, gin.H{
-				"status":  "error",
-				"message": "Failed to connect to database",
-				"error":   err.Error(),
-			})
-			return
+	// HTTP server configuration
+	srv := &http.Server{
+		Addr:    ":" + cfg.ServerPort,
+		Handler: r,
+	}
+
+	// Start server in goroutine
+	go func() {
+		log.Printf("Server starting on port %s", cfg.ServerPort)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Server failed to start: %s\n", err)
 		}
-		c.JSON(200, gin.H{
-			"status":  "ok",
-			"message": "Successfully connected to database",
-		})
-	})
+	}()
 
-	// サーバーを実行
-	r.Run() // デフォルトでは :8080 でリッスンします
-}
+	// Graceful shutdown
