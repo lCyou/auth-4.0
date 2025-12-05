@@ -9,7 +9,6 @@ import (
 	"openid-aas/backend/utils"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/lib/pq"
 )

@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"openid-aas/backend/config"
