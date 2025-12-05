@@ -30,9 +30,9 @@ Go言語で実装されたRESTful APIサーバー。Ginフレームワークを�
   - `admin/` - 管理者向けエンドポイント
   - `oauth/` - 外部OAuthプロバイダー連携
   - `oidc/` - OpenID Connectエンドポイント
-- `middleware/` - CORSなどのミドルウェア
+  - `middleware/` - CORSなどのミドルウェア
+  - `routes/` - ルーティング設定
 - `models/` - データモデル定義
-- `routes/` - ルーティング設定
 - `database/` - データベース接続と操作
 - `config/` - 設定管理
 - `utils/` - ユーティリティ関数（JWT鍵管理など）
@@ -43,10 +43,6 @@ Go言語で実装されたRESTful APIサーバー。Ginフレームワークを�
 - **JWT**: golang-jwt/jwt/v5
 - **OAuth2**: golang.org/x/oauth2
 
-**なぜGoを選んだのか:**
-- 高性能で並行処理に優れている
-- 型安全性が高くバグが少ない
-- セキュリティアプリケーションに適している
 
 ### `/frontend` - フロントエンドUI (Next.js)
 
@@ -63,10 +59,6 @@ React/Next.jsで実装されたWebアプリケーション。
 - **言語**: TypeScript
 - **パッケージマネージャー**: pnpm
 
-**なぜNext.jsを選んだのか:**
-- サーバーサイドレンダリング(SSR)による高速なページ読み込み
-- TypeScriptによる型安全性
-- 優れた開発体験とホットリロード
 
 ### `/database` - データベース設定
 
@@ -85,10 +77,6 @@ PostgreSQLデータベースの初期化スクリプトとDocker構成。
 - `access_tokens` - アクセストークン
 - `refresh_tokens` - リフレッシュトークン
 
-**なぜ独立したディレクトリなのか:**
-- データベーススキーマの管理を一元化
-- バックエンドとフロントエンドの両方から独立
-- Docker Composeでローカル環境を簡単にセットアップ可能
 
 ## 開発ワークフロー
 
