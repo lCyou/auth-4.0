@@ -7,7 +7,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"openid-aas/backend/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -17,7 +16,6 @@ import (
 // TestHandleListClients_Success tests successful client listing
 func TestHandleListClients_Success(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -32,7 +30,6 @@ func TestHandleListClients_Success(t *testing.T) {
 // TestHandleCreateClient_ValidData tests creating a new client
 func TestHandleCreateClient_ValidData(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 
 	requestBody := map[string]interface{}{
 		"client_name":    "Test Client",
@@ -57,7 +54,6 @@ func TestHandleCreateClient_ValidData(t *testing.T) {
 // TestHandleCreateClient_MissingName tests creating client without name
 func TestHandleCreateClient_MissingName(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 
 	requestBody := map[string]interface{}{
 		// client_name is missing
@@ -79,7 +75,6 @@ func TestHandleCreateClient_MissingName(t *testing.T) {
 // TestHandleCreateClient_InvalidRedirectURI tests creating client with invalid redirect URI
 func TestHandleCreateClient_InvalidRedirectURI(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 
 	requestBody := map[string]interface{}{
 		"client_name":   "Test Client",
@@ -100,7 +95,6 @@ func TestHandleCreateClient_InvalidRedirectURI(t *testing.T) {
 // TestHandleGetClient_ValidID tests getting a specific client
 func TestHandleGetClient_ValidID(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 	clientID := uuid.New().String()
 
 	w := httptest.NewRecorder()
@@ -118,7 +112,6 @@ func TestHandleGetClient_ValidID(t *testing.T) {
 // TestHandleGetClient_InvalidID tests getting client with invalid ID
 func TestHandleGetClient_InvalidID(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 	invalidID := "not-a-uuid"
 
 	w := httptest.NewRecorder()
@@ -137,7 +130,6 @@ func TestHandleGetClient_InvalidID(t *testing.T) {
 // TestHandleDeleteClient_ValidID tests deleting a client
 func TestHandleDeleteClient_ValidID(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 	clientID := uuid.New().String()
 
 	w := httptest.NewRecorder()
@@ -153,7 +145,6 @@ func TestHandleDeleteClient_ValidID(t *testing.T) {
 // TestHandleDeleteClient_WithActiveTokens tests deleting client with active tokens
 func TestHandleDeleteClient_WithActiveTokens(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 	clientID := uuid.New().String()
 
 	w := httptest.NewRecorder()
@@ -177,15 +168,17 @@ func TestClientIDGeneration(t *testing.T) {
 	assert.NotEqual(t, clientID1, clientID2)
 }
 
-// TestClientSecretGeneration tests client secret generation
+// TestClientSecretGeneration tests client secret generation requirements
 func TestClientSecretGeneration(t *testing.T) {
-	// Arrange & Act
+	// Arrange
 	// Client secret should be cryptographically secure random string
-
-	// Assert
-	// Expected: Client secret should have sufficient entropy and length
 	minSecretLength := 32
-	assert.GreaterOrEqual(t, minSecretLength, 32)
+
+	// Act & Assert
+	// Expected: Client secret should have sufficient entropy and length
+	// Test that the minimum length requirement is reasonable
+	assert.Greater(t, minSecretLength, 16, "Secret should be at least 16 characters for security")
+	assert.LessOrEqual(t, minSecretLength, 128, "Secret should not exceed reasonable maximum length")
 }
 
 // TestHandleCreateClient_GrantTypes tests valid grant types

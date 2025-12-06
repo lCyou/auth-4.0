@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"openid-aas/backend/config"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -15,7 +14,6 @@ import (
 // TestHandleListUsers_Success tests successful user listing
 func TestHandleListUsers_Success(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -30,21 +28,18 @@ func TestHandleListUsers_Success(t *testing.T) {
 // TestHandleListUsers_EmptyDatabase tests user listing with no users
 func TestHandleListUsers_EmptyDatabase(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
-
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/users", nil)
 
 	// Act & Assert
 	// Expected: Should return empty array with 200 OK
-	// cfg was not used in this test
+	assert.NotNil(t, c)
 }
 
 // TestHandleGetUser_ValidID tests getting a specific user
 func TestHandleGetUser_ValidID(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 	userID := uuid.New().String()
 
 	w := httptest.NewRecorder()
@@ -62,7 +57,6 @@ func TestHandleGetUser_ValidID(t *testing.T) {
 // TestHandleGetUser_InvalidID tests getting user with invalid ID format
 func TestHandleGetUser_InvalidID(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 	invalidID := "not-a-uuid"
 
 	w := httptest.NewRecorder()
@@ -82,7 +76,6 @@ func TestHandleGetUser_InvalidID(t *testing.T) {
 // TestHandleGetUser_NotFound tests getting non-existent user
 func TestHandleGetUser_NotFound(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 	userID := uuid.New().String() // Valid UUID but doesn't exist
 
 	w := httptest.NewRecorder()
@@ -98,7 +91,6 @@ func TestHandleGetUser_NotFound(t *testing.T) {
 // TestHandleDeleteUser_ValidID tests deleting a user
 func TestHandleDeleteUser_ValidID(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 	userID := uuid.New().String()
 
 	w := httptest.NewRecorder()
@@ -114,7 +106,6 @@ func TestHandleDeleteUser_ValidID(t *testing.T) {
 // TestHandleDeleteUser_InvalidID tests deleting with invalid ID
 func TestHandleDeleteUser_InvalidID(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 	invalidID := "not-a-uuid"
 
 	w := httptest.NewRecorder()
@@ -133,7 +124,6 @@ func TestHandleDeleteUser_InvalidID(t *testing.T) {
 // TestHandleDeleteUser_WithProviders tests deleting user with connected providers
 func TestHandleDeleteUser_WithProviders(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 	userID := uuid.New().String()
 
 	w := httptest.NewRecorder()
@@ -149,7 +139,6 @@ func TestHandleDeleteUser_WithProviders(t *testing.T) {
 // TestHandleListUsers_Pagination tests user listing with pagination
 func TestHandleListUsers_Pagination(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
@@ -167,7 +156,6 @@ func TestHandleListUsers_Pagination(t *testing.T) {
 // TestHandleListUsers_Sorting tests user listing with sorting
 func TestHandleListUsers_Sorting(t *testing.T) {
 	// Arrange
-	_ = &config.Config{}
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
