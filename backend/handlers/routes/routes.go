@@ -1,11 +1,13 @@
 package routes
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"openid-aas/backend/config"
 	"openid-aas/backend/handlers/admin"
+	"openid-aas/backend/handlers/middleware"
 	"openid-aas/backend/handlers/oauth"
 	"openid-aas/backend/handlers/oidc"
-	"openid-aas/backend/handlers/middleware"
 
 	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -92,10 +94,25 @@ func Setup(r *gin.Engine, db *pgxpool.Pool, cfg *config.Config) {
 
 			// GitHub OAuth endpoints
 			auth.GET("/github", func(c *gin.Context) {
-				state := c.Query("state")
-				if state == "" {
-					state = "random_state" // TODO: Generate proper state
+				// Generate cryptographically secure random state (RFC 6749)
+				stateBytes := make([]byte, 32)
+				if _, err := rand.Read(stateBytes); err != nil {
+					c.JSON(500, gin.H{"error": "Failed to generate state"})
+					return
 				}
+				state := base64.URLEncoding.EncodeToString(stateBytes)
+
+				// Store state in cookie for validation
+				c.SetCookie(
+					"oauth_state",
+					state,
+					600, // 10 minutes
+					"/",
+					"",
+					false, // secure (set to true in production with HTTPS)
+					true,  // httpOnly
+				)
+
 				authURL := githubHandler.GetAuthURL(state)
 				c.Redirect(302, authURL)
 			})
@@ -108,6 +125,21 @@ func Setup(r *gin.Engine, db *pgxpool.Pool, cfg *config.Config) {
 					c.JSON(400, gin.H{"error": "No authorization code"})
 					return
 				}
+
+				// Validate state parameter (RFC 6749 Section 10.12)
+				storedState, err := c.Cookie("oauth_state")
+				if err != nil || storedState == "" {
+					c.JSON(400, gin.H{"error": "Missing state cookie"})
+					return
+				}
+
+				if state != storedState {
+					c.JSON(400, gin.H{"error": "Invalid state parameter"})
+					return
+				}
+
+				// Clear state cookie after validation
+				c.SetCookie("oauth_state", "", -1, "/", "", false, true)
 
 				// Exchange code for tokens
 				tokenResp, err := githubHandler.ExchangeCode(code)

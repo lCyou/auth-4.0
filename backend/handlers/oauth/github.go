@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"openid-aas/backend/models"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -195,7 +197,12 @@ func (h *GitHubOAuthHandler) CreateOrUpdateUser(ctx context.Context, userInfo *G
 		&user.ID, &user.Sub, &user.Name, &user.Email, &user.EmailVerified, &user.Picture, &user.CreatedAt, &user.UpdatedAt,
 	)
 
-	if err != nil {
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		// Unexpected error occurred
+		return nil, fmt.Errorf("failed to check existing user: %w", err)
+	}
+
+	if errors.Is(err, pgx.ErrNoRows) {
 		// User doesn't exist, create new user
 		userID := uuid.New()
 		sub := fmt.Sprintf("github_%d", userInfo.ID)
@@ -278,22 +285,22 @@ type GitHubTokenResponse struct {
 
 // GitHubUserInfo represents GitHub user information
 type GitHubUserInfo struct {
-	ID             int    `json:"id"`
-	Login          string `json:"login"`
-	Name           string `json:"name"`
-	Email          string `json:"email"`
-	EmailVerified  bool   `json:"-"` // Set separately from emails endpoint
-	AvatarURL      string `json:"avatar_url"`
-	Bio            string `json:"bio"`
-	Company        string `json:"company"`
-	Location       string `json:"location"`
-	Blog           string `json:"blog"`
+	ID              int    `json:"id"`
+	Login           string `json:"login"`
+	Name            string `json:"name"`
+	Email           string `json:"email"`
+	EmailVerified   bool   `json:"-"` // Set separately from emails endpoint
+	AvatarURL       string `json:"avatar_url"`
+	Bio             string `json:"bio"`
+	Company         string `json:"company"`
+	Location        string `json:"location"`
+	Blog            string `json:"blog"`
 	TwitterUsername string `json:"twitter_username"`
-	PublicRepos    int    `json:"public_repos"`
-	Followers      int    `json:"followers"`
-	Following      int    `json:"following"`
-	CreatedAt      string `json:"created_at"`
-	UpdatedAt      string `json:"updated_at"`
+	PublicRepos     int    `json:"public_repos"`
+	Followers       int    `json:"followers"`
+	Following       int    `json:"following"`
+	CreatedAt       string `json:"created_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 // GitHubEmail represents a GitHub user email
