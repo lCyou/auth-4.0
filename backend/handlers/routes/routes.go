@@ -47,10 +47,25 @@ func Setup(r *gin.Engine, db *pgxpool.Pool, cfg *config.Config) {
 		auth := api.Group("/auth")
 		{
 			auth.GET("/google", func(c *gin.Context) {
-				state := c.Query("state")
-				if state == "" {
-					state = "random_state" // TODO: Generate proper state
+				// Generate cryptographically secure random state (RFC 6749)
+				stateBytes := make([]byte, 32)
+				if _, err := rand.Read(stateBytes); err != nil {
+					c.JSON(500, gin.H{"error": "Failed to generate state"})
+					return
 				}
+				state := base64.URLEncoding.EncodeToString(stateBytes)
+
+				// Store state in cookie for validation
+				c.SetCookie(
+					"oauth_state_google",
+					state,
+					600, // 10 minutes
+					"/",
+					"",
+					false, // secure (set to true in production with HTTPS)
+					true,  // httpOnly
+				)
+
 				authURL := googleHandler.GetAuthURL(state)
 				c.Redirect(302, authURL)
 			})
@@ -58,11 +73,37 @@ func Setup(r *gin.Engine, db *pgxpool.Pool, cfg *config.Config) {
 			auth.GET("/callback/google", func(c *gin.Context) {
 				code := c.Query("code")
 				state := c.Query("state")
+				errorParam := c.Query("error")
+
+				// Check for OAuth errors
+				if errorParam != "" {
+					errorDesc := c.Query("error_description")
+					c.JSON(400, gin.H{
+						"error":             errorParam,
+						"error_description": errorDesc,
+					})
+					return
+				}
 
 				if code == "" {
 					c.JSON(400, gin.H{"error": "No authorization code"})
 					return
 				}
+
+				// Validate state parameter (RFC 6749 Section 10.12)
+				storedState, err := c.Cookie("oauth_state_google")
+				if err != nil || storedState == "" {
+					c.JSON(400, gin.H{"error": "Missing state cookie"})
+					return
+				}
+
+				if state != storedState {
+					c.JSON(400, gin.H{"error": "Invalid state parameter"})
+					return
+				}
+
+				// Clear state cookie after validation
+				c.SetCookie("oauth_state_google", "", -1, "/", "", false, true)
 
 				// Exchange code for tokens
 				tokenResp, err := googleHandler.ExchangeCode(code)
