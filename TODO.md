@@ -211,6 +211,20 @@ Google・GitHub のコールバックロジック（state 検証、code 交換�
 
 ---
 
+### 🟡 テストコードが形骸化している
+
+`test/handlers/admin/auth_test.go` をはじめ、多くのテストがハンドラを実際に呼び出さず、リクエストを組み立てるだけで意味のないアサーション（`assert.NotNil(t, c)` 等）しか持っていない。修正したロジックが正しく動くことを保証できていない。
+
+対象:
+- `test/handlers/admin/auth_test.go` — ログイン成功・失敗・不正リクエストを実際にハンドラを呼び出して検証
+- `test/handlers/admin/clients_test.go` — クライアント CRUD の正常系・異常系
+- `test/handlers/admin/users_test.go` — ユーザー一覧・取得・削除の正常系・異常系
+- `test/handlers/oidc/` — 認可コード・トークン発行・UserInfo のフロー全体
+
+DB は `pgxmock` 等でモックするか、テスト用 PostgreSQL コンテナを使った統合テストとして実装する。
+
+---
+
 ### 🟡 `User.PasswordHash` フィールドがモデルにあるが DB スキーマに対応カラムがない (`models/models.go:25`)
 
 `models.User` に `PasswordHash *string` が定義されているが `users` テーブルにそのカラムは存在しない。メールパスワード認証を今後追加する場合はマイグレーションも必要。現状は混乱を招くだけなので削除か TODO コメントで意図を明示する。
