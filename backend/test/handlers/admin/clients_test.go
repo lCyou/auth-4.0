@@ -6,209 +6,243 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	"openid-aas/backend/handlers/admin"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
+	"github.com/pashagolub/pgxmock/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-// TestHandleListClients_Success tests successful client listing
+// clientColumns は HandleListClients / HandleGetClient が SELECT するカラム一覧
+var clientColumns = []string{
+	"id", "client_id", "client_name",
+	"redirect_uris", "grant_types", "response_types",
+	"scope", "token_endpoint_auth_method",
+	"created_at", "updated_at",
+}
+
+// TestHandleListClients_Success はクライアント一覧の正常取得をテストする。
+//
+// Ref: RFC 7591 §2 (Dynamic Client Registration)
+//
+//	https://datatracker.ietf.org/doc/html/rfc7591#section-2
 func TestHandleListClients_Success(t *testing.T) {
-	// Arrange
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	clientID := uuid.New()
+	now := time.Now()
+
+	mock.ExpectQuery(`SELECT (.+) FROM clients`).
+		WillReturnRows(pgxmock.NewRows(clientColumns).
+			AddRow(
+				clientID, "client-abc", "Test Client",
+				pq.Array([]string{"https://app.example.com/callback"}),
+				pq.Array([]string{"authorization_code"}),
+				pq.Array([]string{"code"}),
+				"openid profile email", "client_secret_basic",
+				now, now,
+			))
+
+	handler := admin.NewClientsHandler(mock, newTestConfig())
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/clients", nil)
+	handler.HandleListClients(c)
 
-	// Act & Assert
-	// Expected: Should return list of clients with 200 OK
-	// cfg was not used in this test
-	assert.Equal(t, http.MethodGet, c.Request.Method)
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	clients, ok := resp["clients"].([]interface{})
+	require.True(t, ok)
+	assert.Len(t, clients, 1)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-// TestHandleCreateClient_ValidData tests creating a new client
-func TestHandleCreateClient_ValidData(t *testing.T) {
-	// Arrange
+// TestHandleListClients_Empty は登録クライアントがゼロ件の場合に空配列が返ることをテストする。
+func TestHandleListClients_Empty(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
 
-	requestBody := map[string]interface{}{
-		"client_name":    "Test Client",
-		"redirect_uris":  []string{"https://example.com/callback"},
-		"grant_types":    []string{"authorization_code", "refresh_token"},
-		"response_types": []string{"code"},
-		"scope":          "openid profile email",
-	}
-	jsonBody, _ := json.Marshal(requestBody)
+	mock.ExpectQuery(`SELECT (.+) FROM clients`).
+		WillReturnRows(pgxmock.NewRows(clientColumns))
+
+	handler := admin.NewClientsHandler(mock, newTestConfig())
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/admin/clients", bytes.NewBuffer(jsonBody))
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/clients", nil)
+	handler.HandleListClients(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	clients := resp["clients"].([]interface{})
+	assert.Empty(t, clients)
+}
+
+// TestHandleCreateClient_Success はクライアント作成の正常系をテストする。
+//
+// Ref: RFC 7591 §3.1 (Client Registration Request)
+//
+//	redirect_uris は REQUIRED。
+//	https://datatracker.ietf.org/doc/html/rfc7591#section-3.1
+func TestHandleCreateClient_Success(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	newID := uuid.New()
+	now := time.Now()
+
+	// INSERT ... RETURNING
+	mock.ExpectQuery(`INSERT INTO clients`).
+		WillReturnRows(pgxmock.NewRows(clientColumns).
+			AddRow(
+				newID, "generated-client-id", "My App",
+				pq.Array([]string{"https://app.example.com/callback"}),
+				pq.Array([]string{"authorization_code"}),
+				pq.Array([]string{"code"}),
+				"openid profile email", "client_secret_basic",
+				now, now,
+			))
+
+	handler := admin.NewClientsHandler(mock, newTestConfig())
+
+	body, _ := json.Marshal(map[string]interface{}{
+		"client_name":   "My App",
+		"redirect_uris": []string{"https://app.example.com/callback"},
+	})
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/admin/clients", bytes.NewBuffer(body))
 	c.Request.Header.Set("Content-Type", "application/json")
+	handler.HandleCreateClient(c)
 
-	// Act & Assert
-	// Expected: Should create client and return 201 Created with client_id and client_secret
-	// cfg was not used in this test
-	assert.Contains(t, string(jsonBody), "Test Client")
+	require.Equal(t, http.StatusCreated, w.Code)
+	var resp map[string]interface{}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	// 作成直後のみ client_secret が返る
+	assert.NotEmpty(t, resp["client_secret"], "client_secret must be returned on creation only")
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-// TestHandleCreateClient_MissingName tests creating client without name
-func TestHandleCreateClient_MissingName(t *testing.T) {
-	// Arrange
-
-	requestBody := map[string]interface{}{
-		// client_name is missing
-		"redirect_uris": []string{"https://example.com/callback"},
-	}
-	jsonBody, _ := json.Marshal(requestBody)
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/admin/clients", bytes.NewBuffer(jsonBody))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	// Act & Assert
-	// Expected: Should return 400 Bad Request when client_name is missing
-	// cfg was not used in this test
-	assert.NotContains(t, string(jsonBody), "client_name")
-}
-
-// TestHandleCreateClient_InvalidRedirectURI tests creating client with invalid redirect URI
-func TestHandleCreateClient_InvalidRedirectURI(t *testing.T) {
-	// Arrange
-
-	requestBody := map[string]interface{}{
-		"client_name":   "Test Client",
-		"redirect_uris": []string{"not-a-valid-url"},
-	}
-	jsonBody, _ := json.Marshal(requestBody)
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/api/admin/clients", bytes.NewBuffer(jsonBody))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	// Act & Assert
-	// Expected: Should return 400 Bad Request for invalid redirect URI
-	// cfg was not used in this test
-}
-
-// TestHandleGetClient_ValidID tests getting a specific client
-func TestHandleGetClient_ValidID(t *testing.T) {
-	// Arrange
-	clientID := uuid.New().String()
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/clients/"+clientID, nil)
-	c.Params = gin.Params{{Key: "id", Value: clientID}}
-
-	// Act
-	retrievedID := c.Param("id")
-
-	// Assert
-	assert.Equal(t, clientID, retrievedID)
-}
-
-// TestHandleGetClient_InvalidID tests getting client with invalid ID
-func TestHandleGetClient_InvalidID(t *testing.T) {
-	// Arrange
-	invalidID := "not-a-uuid"
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/clients/"+invalidID, nil)
-	c.Params = gin.Params{{Key: "id", Value: invalidID}}
-
-	// Act
-	_, err := uuid.Parse(invalidID)
-
-	// Assert
-	// Expected: Should return 400 Bad Request for invalid UUID
-	assert.Error(t, err)
-}
-
-// TestHandleDeleteClient_ValidID tests deleting a client
-func TestHandleDeleteClient_ValidID(t *testing.T) {
-	// Arrange
-	clientID := uuid.New().String()
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodDelete, "/api/admin/clients/"+clientID, nil)
-	c.Params = gin.Params{{Key: "id", Value: clientID}}
-
-	// Act & Assert
-	// Expected: Should delete client and return 200 OK
-	// cfg was not used in this test
-}
-
-// TestHandleDeleteClient_WithActiveTokens tests deleting client with active tokens
-func TestHandleDeleteClient_WithActiveTokens(t *testing.T) {
-	// Arrange
-	clientID := uuid.New().String()
-
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodDelete, "/api/admin/clients/"+clientID, nil)
-	c.Params = gin.Params{{Key: "id", Value: clientID}}
-
-	// Act & Assert
-	// Expected: Should cascade delete client and revoke all associated tokens
-	// cfg was not used in this test
-}
-
-// TestClientIDGeneration tests client ID uniqueness
-func TestClientIDGeneration(t *testing.T) {
-	// Arrange
-	clientID1 := uuid.New().String()
-	clientID2 := uuid.New().String()
-
-	// Act & Assert
-	// Expected: Each generated client ID should be unique
-	assert.NotEqual(t, clientID1, clientID2)
-}
-
-// TestClientSecretGeneration tests client secret generation requirements
-func TestClientSecretGeneration(t *testing.T) {
-	// Arrange
-	// Client secret should be cryptographically secure random string
-	minSecretLength := 32
-
-	// Act & Assert
-	// Expected: Client secret should have sufficient entropy and length
-	// Test that the minimum length requirement is reasonable
-	assert.Greater(t, minSecretLength, 16, "Secret should be at least 16 characters for security")
-	assert.LessOrEqual(t, minSecretLength, 128, "Secret should not exceed reasonable maximum length")
-}
-
-// TestHandleCreateClient_GrantTypes tests valid grant types
-func TestHandleCreateClient_GrantTypes(t *testing.T) {
-	// Arrange
-	validGrantTypes := []string{
-		"authorization_code",
-		"refresh_token",
-		"client_credentials",
+// TestHandleCreateClient_MissingRequiredFields は必須フィールド欠落で400が返ることをテストする。
+//
+// Ref: RFC 7591 §3.2.2 (Client Registration Error Response)
+//
+//	https://datatracker.ietf.org/doc/html/rfc7591#section-3.2.2
+func TestHandleCreateClient_MissingRequiredFields(t *testing.T) {
+	tests := []struct {
+		name string
+		body map[string]interface{}
+	}{
+		{"missing client_name", map[string]interface{}{"redirect_uris": []string{"https://example.com"}}},
+		{"missing redirect_uris", map[string]interface{}{"client_name": "App"}},
 	}
 
-	// Act & Assert
-	for _, grantType := range validGrantTypes {
-		assert.NotEmpty(t, grantType)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock, err := pgxmock.NewPool()
+			require.NoError(t, err)
+			defer mock.Close()
+
+			handler := admin.NewClientsHandler(mock, newTestConfig())
+
+			body, _ := json.Marshal(tt.body)
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/admin/clients", bytes.NewBuffer(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			handler.HandleCreateClient(c)
+
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+		})
 	}
 }
 
-// TestHandleCreateClient_ResponseTypes tests valid response types
-func TestHandleCreateClient_ResponseTypes(t *testing.T) {
-	// Arrange
-	validResponseTypes := []string{
-		"code",
-		"token",
-		"id_token",
-		"code token",
-		"code id_token",
-	}
+// TestHandleGetClient_Success はクライアント取得の正常系をテストする。
+func TestHandleGetClient_Success(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
 
-	// Act & Assert
-	for _, responseType := range validResponseTypes {
-		assert.NotEmpty(t, responseType)
-	}
+	clientID := uuid.New()
+	now := time.Now()
+
+	mock.ExpectQuery(`SELECT (.+) FROM clients WHERE id`).
+		WithArgs(clientID.String()).
+		WillReturnRows(pgxmock.NewRows(clientColumns).
+			AddRow(
+				clientID, "client-abc", "Test Client",
+				pq.Array([]string{"https://app.example.com/callback"}),
+				pq.Array([]string{"authorization_code"}),
+				pq.Array([]string{"code"}),
+				"openid profile email", "client_secret_basic",
+				now, now,
+			))
+
+	handler := admin.NewClientsHandler(mock, newTestConfig())
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/clients/"+clientID.String(), nil)
+	c.Params = gin.Params{{Key: "id", Value: clientID.String()}}
+	handler.HandleGetClient(c)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.NoError(t, mock.ExpectationsWereMet())
+}
+
+// TestHandleGetClient_NotFound は存在しないクライアントで404が返ることをテストする。
+func TestHandleGetClient_NotFound(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	clientID := uuid.New()
+	mock.ExpectQuery(`SELECT (.+) FROM clients WHERE id`).
+		WithArgs(clientID.String()).
+		WillReturnRows(pgxmock.NewRows(clientColumns)) // 0件
+
+	handler := admin.NewClientsHandler(mock, newTestConfig())
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/admin/clients/"+clientID.String(), nil)
+	c.Params = gin.Params{{Key: "id", Value: clientID.String()}}
+	handler.HandleGetClient(c)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+}
+
+// TestHandleDeleteClient_Success はクライアント削除の正常系をテストする。
+func TestHandleDeleteClient_Success(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	clientID := uuid.New()
+	mock.ExpectExec(`DELETE FROM clients WHERE id`).
+		WithArgs(clientID.String()).
+		WillReturnResult(pgxmock.NewResult("DELETE", 1))
+
+	handler := admin.NewClientsHandler(mock, newTestConfig())
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/api/admin/clients/"+clientID.String(), nil)
+	c.Params = gin.Params{{Key: "id", Value: clientID.String()}}
+	handler.HandleDeleteClient(c)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
