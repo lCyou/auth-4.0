@@ -1,130 +1,116 @@
 package middleware_test
 
 import (
-"net/http"
-"net/http/httptest"
-"testing"
+	"net/http"
+	"net/http/httptest"
+	"testing"
 
-"github.com/gin-gonic/gin"
-"github.com/stretchr/testify/assert"
+	"openid-aas/backend/handlers/middleware"
+
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/pashagolub/pgxmock/v2"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func init() {
-gin.SetMode(gin.TestMode)
+	gin.SetMode(gin.TestMode)
 }
 
-// TestAuthMiddleware_MissingToken tests authentication middleware without token
-func TestAuthMiddleware_MissingToken(t *testing.T) {
-// Arrange
-w := httptest.NewRecorder()
-c, _ := gin.CreateTestContext(w)
-c.Request = httptest.NewRequest(http.MethodGet, "/protected", nil)
-// No X-Session-Token header set
+// TestAdminAuth_ValidToken は有効なセッショントークンで認証が通ることをテストする。
+func TestAdminAuth_ValidToken(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
 
-// Act
-sessionToken := c.GetHeader("X-Session-Token")
+	adminID := uuid.New()
+	mock.ExpectQuery(`SELECT admin_id FROM admin_sessions WHERE session_token`).
+		WithArgs("valid-token").
+		WillReturnRows(pgxmock.NewRows([]string{"admin_id"}).AddRow(adminID))
 
-// Assert
-// Expected: Should abort with 401 Unauthorized when token is missing
-assert.Empty(t, sessionToken)
+	router := gin.New()
+	router.GET("/protected", middleware.AdminAuth(mock), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("X-Session-Token", "valid-token")
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-// TestAuthMiddleware_ValidTokenHeader tests auth middleware with valid token header
-func TestAuthMiddleware_ValidTokenHeader(t *testing.T) {
-// Arrange
-w := httptest.NewRecorder()
-c, _ := gin.CreateTestContext(w)
-c.Request = httptest.NewRequest(http.MethodGet, "/protected", nil)
-expectedToken := "valid-session-token-123"
-c.Request.Header.Set("X-Session-Token", expectedToken)
+// TestAdminAuth_ValidToken_SetsAdminID は認証後に admin_id がコンテキストにセットされることをテストする。
+func TestAdminAuth_ValidToken_SetsAdminID(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
 
-// Act
-sessionToken := c.GetHeader("X-Session-Token")
+	adminID := uuid.New()
+	mock.ExpectQuery(`SELECT admin_id FROM admin_sessions WHERE session_token`).
+		WithArgs("valid-token").
+		WillReturnRows(pgxmock.NewRows([]string{"admin_id"}).AddRow(adminID))
 
-// Assert
-assert.Equal(t, expectedToken, sessionToken)
-assert.NotEmpty(t, sessionToken)
+	var capturedAdminID interface{}
+	router := gin.New()
+	router.GET("/protected", middleware.AdminAuth(mock), func(c *gin.Context) {
+		capturedAdminID = c.MustGet("admin_id")
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("X-Session-Token", "valid-token")
+	router.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, adminID, capturedAdminID)
 }
 
-// TestAuthMiddleware_TokenExtraction tests token extraction logic
-func TestAuthMiddleware_TokenExtraction(t *testing.T) {
-tests := []struct {
-name          string
-headerValue   string
-expectedEmpty bool
-}{
-{
-name:          "Valid token",
-headerValue:   "session-token-123",
-expectedEmpty: false,
-},
-{
-name:          "Empty token",
-headerValue:   "",
-expectedEmpty: true,
-},
-{
-name:          "Whitespace token",
-headerValue:   "   ",
-expectedEmpty: false,
-},
+// TestAdminAuth_MissingToken はトークンなしで401が返ることをテストする。
+func TestAdminAuth_MissingToken(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
+
+	router := gin.New()
+	router.GET("/protected", middleware.AdminAuth(mock), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	router.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	// DB クエリは実行されないことを確認
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
 
-for _, tt := range tests {
-t.Run(tt.name, func(t *testing.T) {
-// Arrange
-w := httptest.NewRecorder()
-c, _ := gin.CreateTestContext(w)
-c.Request = httptest.NewRequest(http.MethodGet, "/protected", nil)
-if tt.headerValue != "" {
-c.Request.Header.Set("X-Session-Token", tt.headerValue)
-}
+// TestAdminAuth_ExpiredOrInvalidToken は無効・期限切れトークンで401が返ることをテストする。
+func TestAdminAuth_ExpiredOrInvalidToken(t *testing.T) {
+	mock, err := pgxmock.NewPool()
+	require.NoError(t, err)
+	defer mock.Close()
 
-// Act
-sessionToken := c.GetHeader("X-Session-Token")
+	// DB がレコードなしを返す（トークン無効または期限切れ）
+	mock.ExpectQuery(`SELECT admin_id FROM admin_sessions WHERE session_token`).
+		WithArgs("expired-token").
+		WillReturnRows(pgxmock.NewRows([]string{"admin_id"})) // 空の結果セット
 
-// Assert
-if tt.expectedEmpty {
-assert.Empty(t, sessionToken)
-} else {
-assert.NotEmpty(t, sessionToken)
-}
-})
-}
-}
+	router := gin.New()
+	router.GET("/protected", middleware.AdminAuth(mock), func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
 
-// TestAuthMiddleware_MultipleHeaders tests handling of duplicate headers
-func TestAuthMiddleware_MultipleHeaders(t *testing.T) {
-// Arrange
-w := httptest.NewRecorder()
-c, _ := gin.CreateTestContext(w)
-c.Request = httptest.NewRequest(http.MethodGet, "/protected", nil)
-c.Request.Header.Set("X-Session-Token", "token1")
-// Setting again should overwrite
-c.Request.Header.Set("X-Session-Token", "token2")
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/protected", nil)
+	req.Header.Set("X-Session-Token", "expired-token")
+	router.ServeHTTP(w, req)
 
-// Act
-sessionToken := c.GetHeader("X-Session-Token")
-
-// Assert
-// Should get the last set value
-assert.Equal(t, "token2", sessionToken)
-}
-
-// TestAuthMiddleware_CaseSensitivity tests header name case sensitivity
-func TestAuthMiddleware_CaseSensitivity(t *testing.T) {
-// Arrange
-w := httptest.NewRecorder()
-c, _ := gin.CreateTestContext(w)
-c.Request = httptest.NewRequest(http.MethodGet, "/protected", nil)
-c.Request.Header.Set("X-Session-Token", "mytoken")
-
-// Act
-// HTTP headers are case-insensitive
-token1 := c.GetHeader("X-Session-Token")
-token2 := c.GetHeader("x-session-token")
-
-// Assert
-assert.Equal(t, token1, token2)
-assert.NotEmpty(t, token1)
+	assert.Equal(t, http.StatusUnauthorized, w.Code)
+	assert.NoError(t, mock.ExpectationsWereMet())
 }
