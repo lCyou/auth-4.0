@@ -10,7 +10,6 @@ import (
 	"openid-aas/backend/utils"
 
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -51,18 +50,10 @@ func (h *AuthHandler) HandleLogin(c *gin.Context) {
 		return
 	}
 
-	// Verify password using crypt (PostgreSQL's password hash)
-	var storedHash string
-	err = h.db.QueryRow(context.Background(), `
-		SELECT crypt($1, password_hash) = password_hash FROM admins WHERE id = $2
-	`, req.Password, admin.ID).Scan(&storedHash)
-
-	if err != nil || storedHash != "t" {
-		// Fallback to bcrypt comparison for backward compatibility
-		if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(req.Password)); err != nil {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
-			return
-		}
+	// Verify password using bcrypt
+	if err := bcrypt.CompareHashAndPassword([]byte(admin.PasswordHash), []byte(req.Password)); err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
+		return
 	}
 
 	// Generate session token

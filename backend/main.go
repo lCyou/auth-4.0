@@ -11,7 +11,7 @@ import (
 
 	"openid-aas/backend/config"
 	"openid-aas/backend/database"
-	"openid-aas/backend/routes"
+	"openid-aas/backend/handlers/routes"
 	"openid-aas/backend/utils"
 
 	"github.com/gin-gonic/gin"
@@ -64,3 +64,15 @@ func main() {
 	}()
 
 	// Graceful shutdown
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+	log.Println("Shutting down server...")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Fatalf("Server forced to shutdown: %v\n", err)
+	}
+	log.Println("Server exiting")
+}

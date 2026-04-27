@@ -165,7 +165,7 @@ INSERT INTO "admins" ("username", "email", "password_hash")
 VALUES (
   'admin',
   'admin@example.com',
-  crypt('admin123', gen_salt('bf'))
+  '$2a$10$FjuuscaoMWzcR/QPFbP48OKh2tCeoxNHeuZ8v7P6zqZx2lmUMVMnO'
 ) ON CONFLICT (username) DO NOTHING;
 
 -- ====================================

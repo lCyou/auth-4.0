@@ -39,7 +39,7 @@ func NewAuthHandler(db *pgxpool.Pool, cfg *config.Config) *AuthHandler {
 	googleOAuthConfig := &oauth2.Config{
 		ClientID:     cfg.GoogleClientID,
 		ClientSecret: cfg.GoogleClientSecret,
-		RedirectURL:  cfg.GoogleRedirectURL,
+		RedirectURL:  cfg.GoogleRedirectURI,
 		Scopes:       []string{"https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"},
 		Endpoint:     google.Endpoint,
 	}
@@ -111,12 +111,12 @@ func (h *AuthHandler) HandleGoogleCallback(c *gin.Context) {
 
 	// ユーザーが存在するか確認、存在しない場合は作成
 	var user models.User
-	err = tx.QueryRow(context.Background(), "SELECT id, email, name, image, email_verified FROM users WHERE email = $1", userInfo.Email).Scan(&user.ID, &user.Email, &user.Name, &user.Image, &user.EmailVerified)
+	err = tx.QueryRow(context.Background(), "SELECT id, email, name, image, email_verified FROM users WHERE email = $1", userInfo.Email).Scan(&user.ID, &user.Email, &user.Name, &user.Picture, &user.EmailVerified)
 	if err == pgx.ErrNoRows {
 		// ユーザーが存在しない場合、新規作成
 		err = tx.QueryRow(context.Background(),
-			"INSERT INTO users (name, email, image, email_verified) VALUES ($1, $2, $3, $4) RETURNING id, email, name, image, email_verified",
-			userInfo.Name, userInfo.Email, userInfo.Picture, time.Now()).Scan(&user.ID, &user.Email, &user.Name, &user.Image, &user.EmailVerified)
+			"INSERT INTO users (name, email, image, email_verified) VALUES ($1, $2, $3, $4) RETURNING id, email, name, picture, email_verified",
+			userInfo.Name, userInfo.Email, userInfo.Picture, time.Now()).Scan(&user.ID, &user.Email, &user.Name, &user.Picture, &user.EmailVerified)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user"})
 			return
@@ -149,9 +149,14 @@ func (h *AuthHandler) HandleGoogleCallback(c *gin.Context) {
 		return
 	}
 
+	// JWTをレスポンスとして返す
+	c.JSON(http.StatusOK, gin.H{"token": jwtToken})
+
+	// これはクライアント側でやって欲しい
 	// フロントエンドにリダイレクト（トークンをクエリパラメータとして渡す）
-	redirectURL := h.Cfg.FrontendURL + "?token=" + jwtToken
-	c.Redirect(http.StatusTemporaryRedirect, redirectURL)
+	// redirectURL := h.Cfg.FrontendURI + "?token=" + jwtToken
+	// c.Redirect(http.StatusTemporaryRedirect, redirectURL)
+	
 }
 
 // generateOauthState はCSRF対策のためのランダムな文字列を生成します。

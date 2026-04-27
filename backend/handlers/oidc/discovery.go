@@ -1,7 +1,6 @@
 package oidc
 
 import (
-	"crypto/rsa"
 	"encoding/base64"
 	"math/big"
 	"net/http"

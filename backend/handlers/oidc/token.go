@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
-	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"openid-aas/backend/config"
@@ -230,7 +230,7 @@ func (h *TokenHandler) handleAuthorizationCodeGrant(c *gin.Context) {
 
 	// Generate ID token if openid scope is requested
 	var idToken string
-	if contains(authCode.Scope, "openid") {
+	if scopeContains(authCode.Scope, "openid") {
 		idToken, err = utils.GenerateIDToken(
 			user.Sub, user.Name, user.Email, user.Picture,
 			authCode.Nonce, client.ClientID, h.config.JWTIssuer,
@@ -366,6 +366,11 @@ func (h *TokenHandler) handleRefreshTokenGrant(c *gin.Context) {
 	})
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(s) > len(substr) && (s[:len(substr)+1] == substr+" " || s[len(s)-len(substr)-1:] == " "+substr || len(s) > len(substr)+1 && strings.Contains(s, " "+substr+" ")))
+func scopeContains(scopeStr, target string) bool {
+	for _, s := range strings.Fields(scopeStr) {
+		if s == target {
+			return true
+		}
+	}
+	return false
 }
